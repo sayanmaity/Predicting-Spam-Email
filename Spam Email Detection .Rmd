@@ -1,0 +1,203 @@
+
+---
+title: "Predict Spam Email Using R"
+author: "Sayan Maity"
+output: pdf_document
+---
+******************
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## First we set up working directory to save our work 
+```{r}
+getwd() #to know which directory we are working in  
+setwd("C:/Users/s9868852/Downloads") #to setup new working directory
+```
+### Download the data:
+```{r}
+library(kernlab)
+
+data("spam")
+df <- spam
+str(df) # this to show us all the features of the dataset
+```
+### We check for any missing data in the data set.
+```{r}
+anyNA(df)
+any(is.na(df))
+# This is two different way to look for missing data in a data set
+```
+### As we can see every variable other than the variable "type" is of numeric variable. So we need to convert the factor variable into a numeric variable.
+```{r}
+df$type <- as.numeric(df$type) # this will make the factor variable into a numeric variable
+
+df$type[df$type==1] <- 0 # for no-spam
+df$type[df$type==2] <- 1 # for spam
+
+# this is set a binary value for our spam and non spam emails
+```
+### Now we will learn about the data. Some descriptives are useful. Here ,we are calculating the mean of each feature in nonspam and spam classes.
+```{r}
+nonspam <-apply(df[df[,58]==0,],2, mean)
+spam <-apply(df[df[,58]==1,],2, mean)
+table <-cbind(nonspam, spam)
+table
+```
+### We want to know what features have the largest mean difference between spam and nonspam.
+```{r}
+ #check the str for tbl1: it's a list. Chnage it to data.frame
+table <-as.data.frame(table)
+# removing type from table
+table <-table[-58, ]
+# Difference (absolute value for more meaningful!)
+table$diff <-abs(table[,1]-table[,2])
+# order the tbl1 by the difference.  See order()
+table <-round(table[order(table[,3],decreasing =TRUE), ],4)
+table
+```
+### It seems that the first 3 features have different scales, not relative frequencies as others. So let’s see a barplotfor a better visualization without the first three features
+```{r}
+barplot(table[9:4,3],col ="pink",horiz =TRUE,names.arg =rownames(table)[9:4],cex.names =0.7)
+```
+
+
+Now we will develop a learning method that has to decide which features to use and how:
+
+# LPM 
+
+### We will split the data into training and test sets.
+```{r}
+set.seed(1)
+
+ind <- sample(nrow(df),nrow(df)*.7,replace = FALSE)
+
+train <- df[ind,]
+test <- df[-ind,]
+# This would split the data into training set and test ste
+```
+### We wil train a Linear Probability Model on the trainning set by lm().
+```{r}
+model_lpm <- lm(type~.-type,data = train)
+summary(model_lpm)
+#type is numeric 0 and 1. We previously change the class so we can use it for model
+```
+### Now we will predict spam email in the test data.
+```{r}
+phat_lpm <- predict(model_lpm, data = test)
+summary(phat_lpm)
+```
+### Now, we will use 0.5 as a threshold value to assign the emails to spam and no spam category 
+```{r}
+spam_lpm <- ifelse(phat_lpm < 0.5,0,1)
+table(spam_lpm)
+```
+### Here we can see how many emails we predict spam and how many are not spam.Now we will  build the confusion table.
+```{r}
+ct <- table(train$type,spam_lpm)
+ct
+```
+### Using this table we can see how many emails we mcan predict correctly. To measure our prediction we will use two measurement
+### (i)Hit ratio, 
+```{r}
+sum(diag(ct))/sum(ct)
+```
+### (ii)TPR
+```{r}
+ct[2,2]/(sum(ct[,2]))
+```
+### So we can see this model has almost 89 % hit ratio and almost 92 % True Probabilty Ratio
+
+### Now we want to change the threshold to see if we can improve TPR somehow 
+`
+```{r}
+x <- .90
+spam_lpm <- ifelse(phat_lpm < x,0,1)
+ct <- table(train$type,spam_lpm)
+ct[2,2]/(sum(ct[,2]))
+```
+### Here we can improve TPR from 92% to 98% which is a great improvement also a sign of a really good prediction
+
+### Here we want to see that can we build a function that we can use to try different threshold value to check the improvement of TPR
+```{r}
+f1 <- function(x){spam_lpm <- ifelse(phat_lpm < x,0,1)
+return(spam_lpm)}
+f2 <- function(x){ct <- table(train$type,f1(x))
+ct}
+f3 <- function(x){TPR <- f2(x)[2,2]/(sum(f2(x)[,2]))
+return(TPR)}
+f3(.87)
+```
+
+
+*****************
+
+# Logistic
+
+### Now we use the same training and test sets to train a logistic model on the trainning set by glm().
+```{r}
+model_logistic <- glm(type~.-type,family = gaussian ,data = df)
+summary(model_logistic)
+```
+### we will predict spams in the test set.
+```{r}
+phat_logistic <- predict(model_logistic, data = test)
+summary(phat_logistic)
+```
+### Again we use 0.5 as a threshold 
+```{r}
+spam_logistic <- ifelse(phat_lpm < 0.5,0,1)
+table(spam_logistic)
+```
+### and we will build the confusion table
+```{r}
+ct_logistic <- table(train$type,spam_logistic)
+ct_logistic                    
+```
+
+### Hit ratio
+```{r}
+sum(diag(ct_logistic))/sum(ct_logistic)
+```
+### TPR
+```{r}
+ct_logistic[2,2]/(sum(ct_logistic[,2]))
+```
+### Again we will try different threshold to see if we can improve TPR.
+```{r}
+y <- .85
+spam_logistic <- ifelse(phat_lpm < y,0,1)
+ct_logistic <- table(train$type,spam_logistic)
+ct_logistic[2,2]/(sum(ct_logistic[,2]))
+```
+
+
+***************************
+# Prediction 
+### Now we have choose one of the following models
+
+### At thresold value of .85 the TPR is highest for both the models. Thus it doesn't matter which model to choose. But to keep the unit of measurement same we will choose LPM.
+
+### Now how do we know that which features are the most important predictors. Just by looking into the coefficients of LPM model we can see which words are significant
+```{r}
+summary(model_lpm)
+```
+### We can clearly see the words that are significant that are most commonly used words in Spam emails.
+
+###To be more precise we can use principal component analysis to find the features that are explaining the most.
+
+```{r}
+myPCA <- prcomp(df[,1:57], scale. = F, center = F)
+summary(myPCA)
+myPCA$rotation
+```
+## from this analysis we can see that a single variable is explaining 93 percent of the variation.
+
+### This is a very basic analysis to detect which emails are spam and which are not. ALso this can be used to find the keywords to detect which emails are spam. The result of these two model can be used in a more advanced model. But this analysis can show that without any advanced techniques like text analysis we still can detect spam emails by using simple binary choice models like LPM or Logistic models. 
+
+ 
+
+
+
+
+
